@@ -1,26 +1,22 @@
-from typing import Optional
+# app/schemas/user.py
+import uuid
+from uuid import UUID
 from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
+
 
 class UserBase(BaseModel):
     phone_number: str
     name: Optional[str] = None
 
 class UserCreate(UserBase):
-    password: Optional[str] = None
+    pass
 
-class UserUpdate(BaseModel):
-    name: Optional[str] = None
-    is_active: Optional[bool] = None
-
-class UserInDB(UserBase):
-    id: int
+class UserResponse(UserBase):
+    id: UUID
     is_active: bool
     created_at: datetime
-    updated_at: Optional[datetime] = None
-
+    
     class Config:
         from_attributes = True
-
-class User(UserInDB):
-    pass
