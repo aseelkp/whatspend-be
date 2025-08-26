@@ -57,3 +57,6 @@ htmlcov/
 # Alembic
 alembic/versions/*.py
 !alembic/versions/.gitkeep
+
+
+docs/
