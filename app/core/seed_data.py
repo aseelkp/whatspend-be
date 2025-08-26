@@ -1,36 +1,41 @@
-from models import Category
+from app.models.category import Category
 from app.core.database import SessionLocal
 
-default_categories = [
+DEFAULT_CATEGORIES = [
     {
         "name": "groceries",
         "display_name": "Groceries & Food",
         "description": "Expenses related to groceries and dining.",
         "color": "#4CAF50",
+        "icon": "🥗",
     },
     {
         "name": "transportation",
         "display_name": "Transportation",
         "description": "Expenses related to transportation, including public transit and fuel.",
         "color": "#2196F3",
+        "icon": "🚗",
     },
     {
         "name": "entertainment",
         "display_name": "Entertainment",
         "description": "Expenses related to entertainment, including movies, concerts, and events.",
         "color": "#FF9800",
+        "icon": "🎉",
     },
     {
         "name": "healthcare",
         "display_name": "Healthcare",
         "description": "Expenses related to healthcare, including medical bills and insurance.",
         "color": "#E91E63",
+        "icon": "🏥",
     },
     {
         "name": "other",
         "display_name": "Other",
         "description": "Miscellaneous expenses that don't fit into other categories.",
         "color": "#9E9E9E",
+        "icon": "🗂️",
     },
 ]
 
@@ -39,7 +44,7 @@ def seed_categories():
     db = SessionLocal()
 
     try:
-        for category in default_categories:
+        for category in DEFAULT_CATEGORIES:
             existing = db.query(Category).filter_by(name=category["name"]).first()
 
             if not existing:

@@ -14,6 +14,7 @@ class Category(Base):
     display_name = Column(String, nullable=True)
     color = Column(String, nullable=True)
     description = Column(String, nullable=True)
+    icon = Column(String, nullable=True)
 
     is_active = Column(Boolean, default=True)
 
