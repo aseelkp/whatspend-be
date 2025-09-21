@@ -1,66 +1,109 @@
-from typing import List, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.transaction import Transaction
+from typing import Optional, List
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.models.user import User
+from app.models.transaction import Transaction
+from app.models.category import Category
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
 
+
 class TransactionService:
-    def __init__(self):
-        pass
-    
-    async def create_transaction(
-        self, 
-        db: AsyncSession, 
-        transaction: TransactionCreate, 
-        user_id: int
+
+    def create_transaction(
+        self, db: Session, transaction_data: TransactionCreate
     ) -> Transaction:
-        """
-        Create a new transaction for the specified user.
-        """
-        # TODO: Implement transaction creation
-        db_transaction = Transaction(
-            user_id=user_id,
-            amount=transaction.amount,
-            description=transaction.description,
-            category_id=transaction.category_id,
-            original_message=transaction.original_message,
-            transaction_date=transaction.transaction_date
-        )
-        
-        db.add(db_transaction)
-        await db.commit()
-        await db.refresh(db_transaction)
-        return db_transaction
-    
-    async def get_user_transactions(
-        self, 
-        db: AsyncSession, 
-        user_id: int, 
-        skip: int = 0, 
-        limit: int = 100
-    ) -> List[Transaction]:
-        """
-        Get transactions for a specific user with pagination.
-        """
-        # TODO: Implement transaction retrieval
-        result = await db.execute(
-            select(Transaction)
-            .where(Transaction.user_id == user_id)
-            .offset(skip)
-            .limit(limit)
-            .order_by(Transaction.transaction_date.desc())
-        )
-        return result.scalars().all()
-    
-    async def update_transaction(
-        self, 
-        db: AsyncSession, 
-        transaction_id: int, 
-        transaction_update: TransactionUpdate
+        try:
+
+            user = db.query(User).filter(User.id == transaction_data.user_id).first()
+
+            if not user:
+                raise ValueError("User not found")
+
+            category = (
+                db.query(Category)
+                .filter(Category.id == transaction_data.category_id)
+                .first()
+            )
+            if not category:
+                raise ValueError("Category not found")
+
+            new_transaction = Transaction(
+                user_id=transaction_data.user_id,
+                category_id=transaction_data.category_id,
+                amount=transaction_data.amount,
+                transaction_type=transaction_data.transaction_type,
+                description=transaction_data.description,
+                raw_message=transaction_data.raw_message,
+            )
+            db.add(new_transaction)
+            db.commit()
+            db.refresh(new_transaction)
+            return new_transaction
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f"Error creating transaction: {e}")
+            raise
+
+    def update_transaction(
+        self, db: Session, transaction_id: int, transaction_data: TransactionUpdate
     ) -> Optional[Transaction]:
-        """
-        Update an existing transaction.
-        """
-        # TODO: Implement transaction update
-        return None
+        try:
+            transaction = (
+                db.query(Transaction).filter(Transaction.id == transaction_id).first()
+            )
+            if not transaction:
+                return None
+
+            for key, value in transaction_data.dict(exclude_unset=True).items():
+                setattr(transaction, key, value)
+
+            db.commit()
+            db.refresh(transaction)
+            return transaction
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f"Error updating transaction: {e}")
+            raise
+
+    def delete_transaction(self, db: Session, transaction_id: int) -> bool:
+        try:
+            transaction = (
+                db.query(Transaction).filter(Transaction.id == transaction_id).first()
+            )
+            if not transaction:
+                return False
+
+            db.delete(transaction)
+            db.commit()
+            return True
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f"Error deleting transaction: {e}")
+            raise
+
+    def find_category_by_name(
+        self, db: Session, category_name: str
+    ) -> Optional[Category]:
+        category = (
+            db.query(Category)
+            .filter(Category.name == category_name, Category.is_active == True)
+            .first()
+        )
+
+        if category:
+            return category
+
+        # Fallback to 'other' category
+        other_category = (
+            db.query(Category)
+            .filter(Category.name == "other", Category.is_active == True)
+            .first()
+        )
+
+        if not other_category:
+            raise ValueError("No 'other' category found - check category seeding")
+
+        return other_category
+
+transaction_service = TransactionService()
