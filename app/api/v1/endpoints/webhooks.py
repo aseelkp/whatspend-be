@@ -29,4 +29,4 @@ async def whatsapp_webhook(
 
         return Response(content="Message processed successfully", media_type="text/plain", status_code=200)
     except Exception as e:
-        return Response(content="Error processed", media_type="text/plain", status_code=200)
+        return Response(content="Error processed", media_type="text/plain", status_code=500)

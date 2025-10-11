@@ -5,6 +5,7 @@ from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 
 
+from app.api.v1.endpoints import categories
 from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models.user import User
@@ -37,7 +38,16 @@ class WhatsappService:
 
         try:
             user = self._get_or_create_user(db, phone_number)
+            message_clean = message_body.lower().strip()
 
+            if await self._handle_command(message_clean, phone_number, user):
+                return {
+                    "success": True,
+                    "user_id": str(user.id),
+                    "response_sent": True,
+                    "command_handled": True,
+                }
+            
             try:
                 parsed_data = message_parser.parse_message(message_body)
             except ValueError as e:
@@ -51,7 +61,7 @@ class WhatsappService:
                     "response_sent": True,
                 }
 
-            if parsed_data["confidence"] >= self.confidence_threshold:
+            if parsed_data and parsed_data["confidence"] >= self.confidence_threshold:
                 transaction = self._create_transaction(
                     db, user, parsed_data, raw_message=message_body
                 )
@@ -69,16 +79,27 @@ class WhatsappService:
                     "response_sent": True,
                 }
             else:
-                clarification_msg = self._formate_clarification_message(parsed_data)
-                await self._send_whatsapp_message(phone_number, clarification_msg)
+                if parsed_data:
+                    clarification_msg = self._formate_clarification_message(parsed_data)
+                    await self._send_whatsapp_message(phone_number, clarification_msg)
 
-                return {
-                    "success": False,
-                    "error": "Low confidence parsing",
-                    "confidence": parsed_data["confidence"],
-                    "parsed_data": parsed_data,
-                    "response_sent": True,
-                }
+                    return {
+                        "success": False,
+                        "error": "Low confidence parsing",
+                        "confidence": parsed_data["confidence"],
+                        "parsed_data": parsed_data,
+                        "response_sent": True,
+                    }
+                else:
+                    error_msg = f"❌ Sorry, I couldn't understand your message. \n\nTry: 'Spend ₹600 on groceries'"
+                    await self._send_whatsapp_message(phone_number, error_msg)
+                    
+                    return {
+                        "success": False,
+                        "error": "Could not parse message",
+                        "user_id": str(user.id),
+                        "response_sent": True,
+                    }
         except SQLAlchemyError as e:
             db.rollback()
             print(f"SQLAlchemyError occurred: {e}")
@@ -104,13 +125,12 @@ class WhatsappService:
             if phone_number.startswith("whatsapp:")
             else phone_number.replace(" ", "").replace("-", "")
         )
-
+        
         if not clean_phone.startswith("+"):
             clean_phone = "+91" + clean_phone
 
         user = db.query(User).filter(User.phone_number == clean_phone).first()
-
-        if not user:
+        if not user:    
             new_user = User(phone_number=clean_phone, name=None, is_active=True)
 
             db.add(new_user)
@@ -151,6 +171,31 @@ class WhatsappService:
         new_transaction.category = category
 
         return new_transaction
+
+    async def _handle_command(
+        self, message: str, phone_number: str, user: User
+    ) -> bool:
+        if message in ["help", "h", "?", "start" , "hi" , "hello"]:
+            await self._send_help_message(phone_number)
+            return True       
+
+        elif message in ["categories", "cat", "c"]:
+            await self._send_category_list(phone_number)
+            return True
+
+        elif message in ["summary", "stats", "s"]:
+            await self._send_summary(phone_number, user)
+            return True
+
+        elif message in ["last", "recent", "l"]:
+            await self._send_recent_transactions(phone_number, user)
+            return True
+
+        elif message.startswith("delete last"):
+            await self._handle_delete_last(phone_number, user)
+            return True
+
+        return False
 
     def _formate_success_message(
         self, parsed_data: Dict, transaction: Transaction
@@ -225,7 +270,7 @@ class WhatsappService:
             print(f"Error sending WhatsApp message: {e}")
             return False
 
-    async def send_help_message(self, to_number: str) -> bool:
+    async def _send_help_message(self, to_number: str) -> bool:
         help_text = """🤖 *WhatsApp Finance Tracker Help*
 
                 I can track your expenses and income! Just send me messages like:
@@ -246,6 +291,191 @@ class WhatsappService:
 
                 Just describe what you spent money on, and I'll categorize it automatically! 🎯"""
         return await self._send_whatsapp_message(to_number, help_text)
+
+    async def _send_category_list(self, to_number: str) -> bool:
+        db = SessionLocal()
+
+        try:
+            categories = (
+                db.query(Category)
+                .filter(Category.is_active == True)
+                .order_by(Category.name)
+                .all()
+            )
+
+            if not categories:
+                return await self._send_whatsapp_message(
+                    to_number, "No categories found"
+                )
+
+            message = "Here are the available categories:\n\n"
+
+            # formate categories into rows
+
+            for i in range(0, len(categories), 3):
+                row_categories = categories[i : i + 3]
+
+                category_text = []
+                for category in row_categories:
+                    icon = category.icon if category.icon is not None else "📝"
+                    display_name = (
+                        category.display_name
+                        if category.display_name is not None
+                        else category.name.title()
+                    )
+                    category_text.append(f"{icon} {display_name}")
+
+                message += "     ".join(category_text) + "\n"
+
+            message += "\n Just mention any category in your expense message to categorize it automatically"
+            message += "\n\n Example: 'Spent ₹500 on groceries'"
+            return await self._send_whatsapp_message(to_number, message)
+
+        except Exception as e:
+            print(f"Error sending category list: {e}")
+            return False
+        finally:
+            db.close()
+
+    async def _send_summary(self, to_number: str, user: User) -> bool:
+        db = SessionLocal()
+        try:
+            from datetime import datetime, timedelta
+
+            week_start = datetime.now() - timedelta(days=7)
+
+            transactions = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.user_id == user.id, Transaction.created_at >= week_start
+                )
+                .all()
+            )
+
+            if not transactions:
+                message = "*Weekly Summary* \n\n No transactions found this week"
+                return await self._send_whatsapp_message(to_number, message)
+
+            expenses = [
+                t
+                for t in transactions
+                if getattr(t, "transaction_type", None) == "EXPENSE"
+            ]
+            income = [
+                t
+                for t in transactions
+                if getattr(t, "transaction_type", None) == "INCOME"
+            ]
+
+            total_expenses = sum(float(getattr(t, "amount", 0)) for t in expenses)
+            total_income = sum(float(getattr(t, "amount", 0)) for t in income)
+
+            from collections import defaultdict
+
+            category_total = defaultdict(float)
+            for t in expenses:
+                category = (
+                    db.query(Category).filter(Category.id == t.category_id).first()
+                )
+                if category:
+                    category_total[
+                        category.display_name or category.name.title()
+                    ] += float(getattr(t, "amount", 0))
+
+            top_categories = sorted(
+                category_total.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+
+            message = f""" *This Week's  Summary* 
+
+                *Expenses:* ₹{total_expenses:,.0f}
+                *Income:* ₹{total_income:,.0f}
+                *Net:* ₹{total_income - total_expenses:,.0f}
+
+                *Top Expense Categories:*"""
+
+            for category, amount in top_categories:
+                message += f"\n• {category}: ₹{amount:,.0f}"
+
+            if len(transactions) > 0:
+                message += f"\n\n*Total Transactions:* {len(transactions)}"
+
+            return await self._send_whatsapp_message(to_number, message)
+        except Exception as e:
+            print(f"Error sending summary: {e}")
+            return False
+        finally:
+            db.close()
+
+    async def _send_recent_transactions(self, to_number: str, user: User):
+        db = SessionLocal()
+        try:
+            recent_transactions = (
+                db.query(Transaction)
+                .filter(Transaction.user_id == user.id)
+                .order_by(Transaction.created_at.desc())
+                .limit(5)
+                .all()
+            )
+
+            if not recent_transactions:
+                message = "*Recent Transactions* \n\n No transactions found"
+                return await self._send_whatsapp_message(to_number, message)
+
+            message = "*Last 5 Transactions* \n\n"
+            for i, t in enumerate(recent_transactions):
+                category = (
+                    db.query(Category).filter(Category.id == t.category_id).first()
+                )
+                category_name = category.display_name if category else "Other"
+                category_icon = category.icon if category else "📝"
+
+                type_icon = (
+                    "💸" if getattr(t, "transaction_type", None) == "EXPENSE" else "💰"
+                )
+                date_str = t.created_at.strftime("%m/%d")
+
+                message += f"{i+1}. {type_icon} {date_str} - {category_name} {category_icon} - ₹{getattr(t, "amount", 0):,.0f}\n"
+                message += f"\n {t.description} ({date_str}) \n"
+
+            await self._send_whatsapp_message(to_number, message)
+        except Exception as e:
+            print(f"Error sending recent transactions: {e}")
+            return False
+        finally:
+            db.close()
+
+    async def _handle_delete_last(self, to_number: str, user: User):
+        db = SessionLocal()
+        try:
+            last_transaction = (
+                db.query(Transaction)
+                .filter(Transaction.user_id == user.id)
+                .order_by(Transaction.created_at.desc())
+                .first()
+            )
+
+            if not last_transaction:
+                message = "No transactions found to delete"
+                return await self._send_whatsapp_message(to_number, message)
+
+            category = (
+                db.query(Category)
+                .filter(Category.id == last_transaction.category_id)
+                .first()
+            )
+            category_name = category.display_name if category else "Other"
+
+            db.delete(last_transaction)
+            db.commit()
+
+            message = f"Deleted last transaction: \n₹{float(getattr(last_transaction, "amount", 0)):,.0f} - {category_name}\n\n✅ Transaction removed successfully!"
+            return await self._send_whatsapp_message(to_number, message)
+        except Exception as e:
+            print(f"Error deleting last transaction: {e}")
+            return False
+        finally:
+            db.close()
 
 
 whatsapp_service = WhatsappService()

@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
     # OpenAI
-    OPENAI_API_KEY: str = "sk-placeholder-openai-key"
+    # OPENAI_API_KEY: str = "sk-placeholder-openai-key"
+    GEMINI_API_KEY: str = ""
     
     # Twilio
     TWILIO_ACCOUNT_SID: str = "placeholder-account-sid"
