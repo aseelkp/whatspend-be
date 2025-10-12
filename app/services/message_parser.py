@@ -3,6 +3,10 @@ import re
 from typing import Dict, Optional
 from decimal import Decimal
 from app.models.transaction import TransactionType
+from app.services.llm_service import llm_service
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MessageParser:
@@ -23,16 +27,23 @@ class MessageParser:
                 "groceries",
                 "vegetables",
                 "fruits",
-                "food shopping",
-                "market",
                 "sabzi",
+                "market",
                 "vegetable",
                 "fruit",
                 "dmart",
-                "reliance fresh",
-                "more",
+                "reliance",
+                "food",
+                "meal",
+                "dinner",
+                "lunch",
+                "breakfast",
+                "restaurant",
+                "zomato",
+                "swiggy",
+                "eating",
             ],
-            "transport": [
+            "transportation": [
                 "uber",
                 "ola",
                 "taxi",
@@ -46,47 +57,7 @@ class MessageParser:
                 "parking",
                 "toll",
                 "rapido",
-            ],
-            "food": [
-                "coffee",
-                "tea",
-                "lunch",
-                "dinner",
-                "breakfast",
-                "restaurant",
-                "zomato",
-                "swiggy",
-                "food",
-                "meal",
-                "cafe",
-                "pizza",
-                "burger",
-            ],
-            "bills": [
-                "electricity",
-                "water",
-                "gas",
-                "internet",
-                "mobile",
-                "bill",
-                "recharge",
-                "wifi",
-                "broadband",
-                "phone bill",
-                "utility",
-            ],
-            "shopping": [
-                "amazon",
-                "flipkart",
-                "myntra",
-                "clothes",
-                "shoes",
-                "shopping",
-                "buy",
-                "bought",
-                "shirt",
-                "pants",
-                "dress",
+                "transport",
             ],
             "entertainment": [
                 "movie",
@@ -100,8 +71,10 @@ class MessageParser:
                 "show",
                 "pvr",
                 "inox",
+                "concert",
+                "party",
             ],
-            "health": [
+            "healthcare": [
                 "medicine",
                 "doctor",
                 "hospital",
@@ -110,8 +83,10 @@ class MessageParser:
                 "health",
                 "appointment",
                 "checkup",
+                "prescription",
+                "healthcare",
             ],
-            "other": [],  # Default fallback
+            "other": [],
         }
 
         # Transaction type indicators
@@ -143,6 +118,18 @@ class MessageParser:
         if not message or not message.strip():
             raise ValueError("Message cannot be empty")
 
+        try:
+            logger.info(f"Attempting to parse message with LLM : {message}")
+            ai_result = llm_service.parse_message_with_llm(message)
+            logger.info(
+                f"LLM parsed message successfully with result: {ai_result} and is_multiple: {ai_result['is_multiple'] if ai_result else False}"
+            )
+            return ai_result
+        except Exception as e:
+            logger.warning(
+                f"Error parsing message with LLM , falling back to regex: {e}"
+            )
+            pass
         message = message.lower().strip()
 
         amount = self._extract_amount(message)
@@ -212,7 +199,7 @@ class MessageParser:
                 continue
 
             for keyword in keywords:
-                if keyword in message:
+                if keyword.lower() in message.lower():
                     return category
 
         return "other"  # Default fallback

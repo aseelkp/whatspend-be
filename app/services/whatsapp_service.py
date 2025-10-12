@@ -1,4 +1,5 @@
-from typing import Dict, Optional
+from ast import parse
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from twilio.rest import Client
@@ -13,6 +14,7 @@ from app.models.transaction import Transaction
 from app.models.category import Category
 from app.services.message_parser import message_parser
 from app.schemas.transaction import TransactionCreate
+from app.models.transaction import TransactionType
 
 
 class WhatsappService:
@@ -47,7 +49,7 @@ class WhatsappService:
                     "response_sent": True,
                     "command_handled": True,
                 }
-            
+
             try:
                 parsed_data = message_parser.parse_message(message_body)
             except ValueError as e:
@@ -61,45 +63,124 @@ class WhatsappService:
                     "response_sent": True,
                 }
 
-            if parsed_data and parsed_data["confidence"] >= self.confidence_threshold:
-                transaction = self._create_transaction(
-                    db, user, parsed_data, raw_message=message_body
+            # Determine if the parsed data is for multiple transactions
+            if parsed_data and parsed_data.get("is_multiple"):
+                transactions = parsed_data.get("transactions", [])
+                # Check if all transactions' confidence is above threshold
+                all_above_threshold = all(
+                    t.get("confidence", 0) >= self.confidence_threshold
+                    for t in transactions
                 )
-
-                success_msg = self._formate_success_message(parsed_data, transaction)
-
-                await self._send_whatsapp_message(phone_number, success_msg)
-
-                return {
-                    "success": True,
-                    "user_id": str(user.id),
-                    "transaction_id": str(transaction.id),
-                    "parsed_data": parsed_data,
-                    "confidence": parsed_data["confidence"],
-                    "response_sent": True,
-                }
-            else:
-                if parsed_data:
-                    clarification_msg = self._formate_clarification_message(parsed_data)
-                    await self._send_whatsapp_message(phone_number, clarification_msg)
-
+                if all_above_threshold:
+                    recorded_transactions = []
+                    for t in transactions:
+                        transaction = self._create_transaction(
+                            db, user, t, raw_message=message_body
+                        )
+                        recorded_transactions.append(transaction)
+                    # Use the dedicated method to generate the multiple success message
+                    success_msg = self._formate_success_message(
+                        parsed_data, recorded_transactions
+                    )
+                    await self._send_whatsapp_message(phone_number, success_msg)
                     return {
-                        "success": False,
-                        "error": "Low confidence parsing",
-                        "confidence": parsed_data["confidence"],
+                        "success": True,
+                        "user_id": str(user.id),
+                        "transactions": [str(t.id) for t in recorded_transactions],
                         "parsed_data": parsed_data,
+                        "confidence": [t["confidence"] for t in transactions],
                         "response_sent": True,
                     }
                 else:
-                    error_msg = f"❌ Sorry, I couldn't understand your message. \n\nTry: 'Spend ₹600 on groceries'"
-                    await self._send_whatsapp_message(phone_number, error_msg)
-                    
+                    # For each transaction, send clarification if confidence too low
+                    for t in transactions:
+                        if t.get("confidence", 0) < self.confidence_threshold:
+                            clarification_msg = self._formate_clarification_message(t)
+                            await self._send_whatsapp_message(
+                                phone_number, clarification_msg
+                            )
                     return {
                         "success": False,
-                        "error": "Could not parse message",
-                        "user_id": str(user.id),
+                        "error": "One or more transactions have low confidence",
+                        "parsed_data": parsed_data,
+                        "confidence": [t.get("confidence", 0) for t in transactions],
                         "response_sent": True,
                     }
+            else:
+                # Single transaction case
+                transaction = parsed_data.get("transactions", [])[0] if parsed_data else {}
+                if (
+                    parsed_data
+                    and parsed_data.get("transactions", [])[0].get("confidence", 0) >= self.confidence_threshold
+                ):
+                    transaction = self._create_transaction(
+                        db, user, parsed_data.get("transactions", [])[0], raw_message=message_body
+                    )
+                    # Use the dedicated method for single transaction success message
+                    success_msg = self._formate_success_message(
+                        parsed_data, [transaction]
+                    )
+                    await self._send_whatsapp_message(phone_number, success_msg)
+                    return {
+                        "success": True,
+                        "user_id": str(user.id),
+                        "transaction_id": str(transaction.id),
+                        "parsed_data": parsed_data,
+                        "confidence": parsed_data.get("confidence", 0),
+                        "response_sent": True,
+                    }
+                else:
+                    clarification_msg = self._formate_clarification_message(parsed_data if parsed_data else {})
+                    await self._send_whatsapp_message(phone_number, clarification_msg)
+                    return {
+                        "success": False,
+                        "error": "Low confidence parsing",
+                        "confidence": (
+                            parsed_data.get("confidence", 0) if parsed_data else None
+                        ),
+                        "parsed_data": parsed_data,
+                        "response_sent": True,
+                    }
+
+            # if parsed_data and parsed_data["confidence"] >= self.confidence_threshold:
+            #     transaction = self._create_transaction(
+            #         db, user, parsed_data, raw_message=message_body
+            #     )
+
+            #     success_msg = self._formate_success_message(parsed_data, transaction)
+
+            #     # await self._send_whatsapp_message(phone_number, success_msg)
+
+            #     return {
+            #         "success": True,
+            #         "user_id": str(user.id),
+            #         "transaction_id": str(transaction.id),
+            #         "parsed_data": parsed_data,
+            #         "confidence": parsed_data["confidence"],
+            #         "response_sent": True,
+            #     }
+            # else:
+            #     if parsed_data:
+            #         clarification_msg = self._formate_clarification_message(parsed_data)
+            #         await self._send_whatsapp_message(phone_number, clarification_msg)
+
+            #         return {
+            #             "success": False,
+            #             "error": "Low confidence parsing",
+            #             "confidence": parsed_data["confidence"],
+            #             "parsed_data": parsed_data,
+            #             "response_sent": True,
+            #         }
+            #     else:
+            #         error_msg = f"❌ Sorry, I couldn't understand your message. \n\nTry: 'Spend ₹600 on groceries'"
+            #         await self._send_whatsapp_message(phone_number, error_msg)
+
+            #         return {
+            #             "success": False,
+            #             "error": "Could not parse message",
+            #             "user_id": str(user.id),
+            #             "response_sent": True,
+            #         }
         except SQLAlchemyError as e:
             db.rollback()
             print(f"SQLAlchemyError occurred: {e}")
@@ -125,12 +206,12 @@ class WhatsappService:
             if phone_number.startswith("whatsapp:")
             else phone_number.replace(" ", "").replace("-", "")
         )
-        
+
         if not clean_phone.startswith("+"):
             clean_phone = "+91" + clean_phone
 
         user = db.query(User).filter(User.phone_number == clean_phone).first()
-        if not user:    
+        if not user:
             new_user = User(phone_number=clean_phone, name=None, is_active=True)
 
             db.add(new_user)
@@ -175,9 +256,9 @@ class WhatsappService:
     async def _handle_command(
         self, message: str, phone_number: str, user: User
     ) -> bool:
-        if message in ["help", "h", "?", "start" , "hi" , "hello"]:
+        if message in ["help", "h", "?", "start", "hi", "hello"]:
             await self._send_help_message(phone_number)
-            return True       
+            return True
 
         elif message in ["categories", "cat", "c"]:
             await self._send_category_list(phone_number)
@@ -198,47 +279,74 @@ class WhatsappService:
         return False
 
     def _formate_success_message(
-        self, parsed_data: Dict, transaction: Transaction
+        self, parsed_data: Dict, transactions: List[Transaction]
     ) -> str:
-
-        amount = parsed_data["amount"]
-        transaction_type = parsed_data["transaction_type"]
-
-        category_name = (
-            transaction.category.name
-            if hasattr(transaction, "category") and transaction.category
-            else parsed_data["category"]
+        sum_amount = sum(t.amount for t in transactions)
+        sum_amount = f"₹{sum_amount:,.0f}"
+        msg = (
+            len(transactions) > 1
+            and f"Recorded multiple transactions for {sum_amount} \n\n"
+            or f"Recorded one transaction for {sum_amount} \n\n"
         )
-        category_icon = (
-            transaction.category.icon
-            if hasattr(transaction, "category") and transaction.category
-            else "📝"
-        )
-        category_display = (
-            transaction.category.display_name
-            if hasattr(transaction, "category") and transaction.category
-            else category_name.title()
-        )
-
-        type_word = "income" if transaction_type == "INCOME" else "expense"
-
-        msg = f"✅ Recorded ₹{amount:,.0f} {type_word} for {category_display} {category_icon}\n\n"
-        msg += f"Description: {parsed_data['description']}\n"
+        for transaction in transactions:
+            category_name = (
+                transaction.category.name
+                if hasattr(transaction, "category") and transaction.category
+                else parsed_data["category"]
+            )
+            category_icon = (
+                transaction.category.icon
+                if hasattr(transaction, "category") and transaction.category
+                else "📝"
+            )
+            category_display = (
+                transaction.category.display_name
+                if hasattr(transaction, "category") and transaction.category
+                else category_name.title()
+            )
+            type_word = (
+                "income"
+                if getattr(transaction, "transaction_type", None) == TransactionType.INCOME
+                else "expense"
+            )
+            msg += f"✅ Recorded ₹{transaction.amount:,.0f} {type_word} for {category_display} {category_icon}\n\n"
+            msg += f"Description: {transaction.description}\n"
+            msg += "\n\n"
 
         return msg
 
     def _formate_clarification_message(self, parsed_data: Dict) -> str:
+        # Handle multiple transactions case
+        if parsed_data.get("is_multiple"):
+            transactions = parsed_data.get("transactions", [])
+            message = f"🤔 I found {len(transactions)} transactions, but I'm not completely sure about some of them:\n\n"
+            
+            for i, t in enumerate(transactions, 1):
+                confidence = t.get("confidence", 0)
+                message += f"*Transaction {i}* (confidence: {confidence:.0%}):\n"
+                
+                if t.get("amount"):
+                    message += f"💰 Amount: ₹{t['amount']:,.0f}\n"
+                if t.get("category"):
+                    message += f"📂 Category: {t['category'].title()}\n"
+                if t.get("transaction_type"):
+                    message += f"📊 Type: {t['transaction_type'].title()}\n"
+                if t.get("description"):
+                    message += f"📝 Description: {t['description']}\n"
+                
+                message += "\n"
+        else:
+            # Single transaction case
+            transaction = parsed_data.get("transactions", [])[0]
+            confidence = transaction.get("confidence", 0)
+            message = f"🤔 I think I understood, but I'm not completely sure (confidence: {confidence:.0%}):\n\n"
 
-        confidence = parsed_data.get("confidence", 0)
-
-        message = f"🤔 I think I understood, but I'm not completely sure (confidence: {confidence:.0%}):\n\n"
-
-        if parsed_data.get("amount"):
-            message += f"💰 Amount: ₹{parsed_data['amount']:,.0f}\n"
-        if parsed_data.get("category"):
-            message += f"📂 Category: {parsed_data['category'].title()}\n"
-        if parsed_data.get("transaction_type"):
-            message += f"📊 Type: {parsed_data['transaction_type'].title()}\n"
+            if transaction.get("amount"):
+                message += f"💰 Amount: ₹{transaction['amount']:,.0f}\n"
+            if transaction.get("category"):
+                message += f"📂 Category: {transaction['category'].title()}\n"
+            if transaction.get("transaction_type"):
+                message += f"📊 Type: {transaction['transaction_type'].title()}\n"
 
         message += "\n💡 Try being more specific:\n"
         message += "• 'Spent ₹500 on groceries'\n"
