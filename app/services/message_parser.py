@@ -112,7 +112,7 @@ class MessageParser:
             "profit",
         ]
 
-    def parse_message(self, message: str):
+    def parse_message(self, message: str, user_id: Optional[str] = None):
         """Parse the message and extract transaction details."""
 
         if not message or not message.strip():
@@ -120,7 +120,7 @@ class MessageParser:
 
         try:
             logger.info(f"Attempting to parse message with LLM : {message}")
-            ai_result = llm_service.parse_message_with_llm(message)
+            ai_result = llm_service.parse_message_with_llm(message , user_id=user_id)
             logger.info(
                 f"LLM parsed message successfully with result: {ai_result} and is_multiple: {ai_result['is_multiple'] if ai_result else False}"
             )

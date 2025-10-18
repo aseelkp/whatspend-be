@@ -1,40 +1,58 @@
 from typing import Generator
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt
+from jose.exceptions import JWTError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core import security
 from app.core.config import settings
-from app.core.database import get_session
+from app.core.database import get_db
+from app.models.user import User
+from app.services.auth_service import auth_service
 
 reusable_oauth2 = HTTPBearer()
 
-async def get_db() -> Generator:
-    try:
-        db = get_session()
-        yield db
-    finally:
-        await db.aclose()
 
-async def get_current_user(
-    db: AsyncSession = Depends(get_db), token: str = Depends(reusable_oauth2)
-) -> dict:
-    try:
-        payload = jwt.decode(
-            token.credentials, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
-        )
-        token_data = payload.get("sub")
-    except (jwt.JWTError, ValidationError):
+def get_token_from_header(authorization : str) :
+    if not authorization : 
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "Missing Authorization header"
         )
     
-    # TODO: Implement user lookup from database
-    user = {"id": token_data}  # Placeholder
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer" : 
+        raise HTTPException(
+            status_code = status.HTTP_401_UNAUTHORIZED,
+            detail = "Invalid Authorization header"
+        )
     
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return parts[1]
+
+def get_current_user(authorization : str , db : Session = Depends(get_db)) :
+
+    try : 
+        token = get_token_from_header(authorization)
+        
+        user_id = auth_service.verify_jwt_token(token)
+
+        user = db.query(User).filter(User.id == user_id).first()
+
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED , detail="User not found")
+        
+        if not user.is_active.value:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN , detail="User is not active")
+
+        return user
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED , detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR , detail=str(e))
+
+        

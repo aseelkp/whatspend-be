@@ -51,7 +51,7 @@ class WhatsappService:
                 }
 
             try:
-                parsed_data = message_parser.parse_message(message_body)
+                parsed_data = message_parser.parse_message(message_body , user_id=str(user.id))
             except ValueError as e:
                 error_msg = f"❌ Sorry , I coudn't find an amount in your message . \n\nTry : 'Spend ₹600 on groceries' "
                 await self._send_whatsapp_message(phone_number, error_msg)
@@ -108,13 +108,19 @@ class WhatsappService:
                     }
             else:
                 # Single transaction case
-                transaction = parsed_data.get("transactions", [])[0] if parsed_data else {}
+                transaction = (
+                    parsed_data.get("transactions", [])[0] if parsed_data else {}
+                )
                 if (
                     parsed_data
-                    and parsed_data.get("transactions", [])[0].get("confidence", 0) >= self.confidence_threshold
+                    and parsed_data.get("transactions", [])[0].get("confidence", 0)
+                    >= self.confidence_threshold
                 ):
                     transaction = self._create_transaction(
-                        db, user, parsed_data.get("transactions", [])[0], raw_message=message_body
+                        db,
+                        user,
+                        parsed_data.get("transactions", [])[0],
+                        raw_message=message_body,
                     )
                     # Use the dedicated method for single transaction success message
                     success_msg = self._formate_success_message(
@@ -130,7 +136,9 @@ class WhatsappService:
                         "response_sent": True,
                     }
                 else:
-                    clarification_msg = self._formate_clarification_message(parsed_data if parsed_data else {})
+                    clarification_msg = self._formate_clarification_message(
+                        parsed_data if parsed_data else {}
+                    )
                     await self._send_whatsapp_message(phone_number, clarification_msg)
                     return {
                         "success": False,
@@ -227,18 +235,20 @@ class WhatsappService:
     ) -> Transaction:
 
         category = (
-            db.query(Category).filter(Category.name == parsed_data["category"]).first()
+            db.query(Category).filter(Category.name == parsed_data["category"] , Category.user_id == user.id).first()
         )
 
         if not category:
-            category = db.query(Category).filter(Category.name == "other").first()
+            category = db.query(Category).filter(Category.name == "other" , Category.user_id == user.id , Category.is_default == True).first()
 
         if not category:
-            raise ValueError("No valid category found in database")
+            category = db.query(Category).filter(
+                Category.name == "other" , Category.user_id == user.id
+            ).first()
 
         new_transaction = Transaction(
             user_id=user.id,
-            category_id=category.id,
+            category_id=category.id if category else None,
             amount=parsed_data["amount"],
             transaction_type=parsed_data["transaction_type"],
             description=parsed_data["description"],
@@ -306,7 +316,8 @@ class WhatsappService:
             )
             type_word = (
                 "income"
-                if getattr(transaction, "transaction_type", None) == TransactionType.INCOME
+                if getattr(transaction, "transaction_type", None)
+                == TransactionType.INCOME
                 else "expense"
             )
             msg += f"✅ Recorded ₹{transaction.amount:,.0f} {type_word} for {category_display} {category_icon}\n\n"
@@ -320,11 +331,11 @@ class WhatsappService:
         if parsed_data.get("is_multiple"):
             transactions = parsed_data.get("transactions", [])
             message = f"🤔 I found {len(transactions)} transactions, but I'm not completely sure about some of them:\n\n"
-            
+
             for i, t in enumerate(transactions, 1):
                 confidence = t.get("confidence", 0)
                 message += f"*Transaction {i}* (confidence: {confidence:.0%}):\n"
-                
+
                 if t.get("amount"):
                     message += f"💰 Amount: ₹{t['amount']:,.0f}\n"
                 if t.get("category"):
@@ -333,7 +344,7 @@ class WhatsappService:
                     message += f"📊 Type: {t['transaction_type'].title()}\n"
                 if t.get("description"):
                     message += f"📝 Description: {t['description']}\n"
-                
+
                 message += "\n"
         else:
             # Single transaction case

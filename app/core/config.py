@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/finance_tracker"
-    
+    DASHBOARD_URL: str = "http://localhost:5173"
     # Authentication
     JWT_SECRET_KEY: str = "your-super-secret-jwt-key-change-this-in-production"
     JWT_ALGORITHM: str = "HS256"

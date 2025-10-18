@@ -67,3 +67,17 @@ def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
                 )
             ],
         )
+
+
+@router.get("/user/{user_id}", response_model=StandardResponse)
+def get_user_categories(user_id : str , db : Session = Depends(get_db)) : 
+    
+    categories = db.query(Category).filter(
+        Category.user_id == user_id ,
+        Category.is_active == True
+    ).all()
+
+    return success("Categories retrieved successfully", data=[CategoryResponse.model_validate(cat).model_dump() for cat in categories])
+
+@router.post("/user/{user_id}", response_model=StandardResponse)
+def create_user_category(user = Depends(get_current_user))

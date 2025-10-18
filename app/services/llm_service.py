@@ -28,14 +28,14 @@ class LLMService:
             logger.error(f"Error initializing LLMService: {e}")
             raise e
 
-    def parse_message_with_llm(self, message: str):
+    def parse_message_with_llm(self, message: str , user_id: Optional[str] = None):
 
         if not self.client:
             logger.error("Client not initialized")
             return None
 
         try:
-            prompt = self._create_extraction_prompt(message)
+            prompt = self._create_extraction_prompt(message , user_id=user_id)
 
             response: GenerateContentResponse = self.client.models.generate_content(
                 model=self.model,
@@ -55,18 +55,14 @@ class LLMService:
             logger.error(f"Error parsing message with Gemini: {e}")
             raise ValueError(f"Error parsing message with Gemini: {e}")
 
-    def _create_extraction_prompt(self, message: str) -> str:
+    def _create_extraction_prompt(self, message: str, user_id: Optional[str] = None) -> str:
 
         db = SessionLocal()
         try:
-            categories = db.query(Category).filter(Category.is_active == True).all()
-
-            category_list = []
-            for cat in categories:
-                category_list.append(f'"{cat.name}" - {cat.display_name}')
+            categories = self._get_valid_categories(user_id=user_id)
 
             categories_text = "\n".join(
-                [f"{i+1}. {cat}" for i, cat in enumerate(category_list)]
+                [f"{i+1}. {cat}" for i, cat in enumerate(categories)]
             )
         finally:
             db.close()
@@ -177,7 +173,7 @@ class LLMService:
         if transaction["transaction_type"] not in ["EXPENSE", "INCOME"]:
             raise ValueError("Invalid transaction type")
 
-        valid_categories = self._get_valid_categories()
+        valid_categories = self._get_valid_categories(user_id=transaction["user_id"])
         if transaction["category"].lower() not in valid_categories:
             logger.warning(f"Invalid category: {transaction['category']}")
             transaction["category"] = "other"
@@ -193,7 +189,7 @@ class LLMService:
             "confidence": float(transaction["confidence"]),
         }
 
-    def _get_valid_categories(self, force_refresh: bool = False):
+    def _get_valid_categories(self, force_refresh: bool = False, user_id: Optional[str] = None):
 
         from datetime import datetime, timedelta
 
@@ -205,7 +201,22 @@ class LLMService:
                 return self._category_cache
         db = SessionLocal()
         try:
-            categories = db.query(Category).filter(Category.is_active == True).all()
+            if user_id:
+                categories = db.query(Category).filter(
+                    Category.is_active == True,
+                    Category.user_id == user_id
+                ).all()
+                if not categories:
+                    # fallback to default, active categories
+                    categories = db.query(Category).filter(
+                        Category.is_active == True,
+                        Category.is_default == True
+                    ).all()
+            else:
+                categories = db.query(Category).filter(
+                    Category.is_active == True,
+                    Category.is_default == True
+                ).all()
             self._category_cache = [cat.name for cat in categories]
             self._cache_timestamp = datetime.now()
             logger.info(
