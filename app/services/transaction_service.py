@@ -12,7 +12,7 @@ class TransactionService:
 
     def create_transaction(
         self, db: Session, transaction_data: TransactionCreate
-    ) -> Transaction:
+     ) -> Transaction:
         try:
 
             user = db.query(User).filter(User.id == transaction_data.user_id).first()
@@ -47,7 +47,7 @@ class TransactionService:
 
     def update_transaction(
         self, db: Session, transaction_id: int, transaction_data: TransactionUpdate
-    ) -> Optional[Transaction]:
+     ) -> Optional[Transaction]:
         try:
             transaction = (
                 db.query(Transaction).filter(Transaction.id == transaction_id).first()
@@ -84,7 +84,7 @@ class TransactionService:
 
     def find_category_by_name(
         self, db: Session, category_name: str
-    ) -> Optional[Category]:
+     ) -> Optional[Category]:
         category = (
             db.query(Category)
             .filter(Category.name == category_name, Category.is_active == True)
@@ -105,5 +105,6 @@ class TransactionService:
             raise ValueError("No 'other' category found - check category seeding")
 
         return other_category
+
 
 transaction_service = TransactionService()

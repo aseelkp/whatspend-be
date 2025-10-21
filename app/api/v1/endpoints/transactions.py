@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from app.core.database import get_db
+from app.core.deps import get_current_user
 from app.core.responses import create_pagination_info, success, error
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
@@ -15,17 +16,20 @@ from app.schemas.transaction import (
     TransactionResponse,
 )
 from app.schemas.responses import StandardResponse, ErrorDetail
+from app.services.transaction_service import transaction_service
 
 router = APIRouter()
 
 
 @router.post("/", response_model=StandardResponse)
 def create_transaction(
-    transaction_data: TransactionCreate, db: Session = Depends(get_db)
+    transaction_data: TransactionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new transaction"""
 
-    user = db.query(User).filter(User.id == transaction_data.user_id).first()
+    user = db.query(User).filter(User.id == current_user.id).first()
     if not user:
         return error(
             message="Transaction creation failed",
@@ -51,25 +55,16 @@ def create_transaction(
             ],
         )
 
-    transaction = Transaction(
-        user_id=transaction_data.user_id,
-        category_id=transaction_data.category_id,
-        amount=transaction_data.amount,
-        transaction_type=transaction_data.transaction_type,
-        description=transaction_data.description,
-        raw_message=transaction_data.raw_message,
-    )
-
-    print("Transaction created:", transaction.id)
     try:
-        db.add(transaction)
-        db.commit()
-        db.refresh(transaction)
+        transaction = transaction_service.create_transaction(db, transaction_data)
+
+        print("Transaction created:", transaction.id)
 
         transaction_response = build_transaction_response(transaction, db)
 
         return success(
-            message="Transaction created successfully", data=TransactionResponse.model_validate(transaction_response).model_dump()
+            message="Transaction created successfully",
+            data=TransactionResponse.model_validate(transaction_response).model_dump(),
         )
     except Exception as e:
         db.rollback()
@@ -163,9 +158,6 @@ def get_transactions(
         .limit(per_page)
         .all()
     )
-
-
-
 
     transaction_data = [build_transaction_response(txn, db) for txn in transactions]
 
