@@ -19,3 +19,4 @@ class User(Base):
 
     categories = relationship("Category", back_populates="user" , cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="user")
+    magic_links = relationship("MagicLink", back_populates="user", cascade="all, delete-orphan")

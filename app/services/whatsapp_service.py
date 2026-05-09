@@ -51,7 +51,9 @@ class WhatsappService:
                 }
 
             try:
-                parsed_data = message_parser.parse_message(message_body , user_id=str(user.id))
+                parsed_data = message_parser.parse_message(
+                    message_body, user_id=str(user.id)
+                )
             except ValueError as e:
                 error_msg = f"❌ Sorry , I coudn't find an amount in your message . \n\nTry : 'Spend ₹600 on groceries' "
                 await self._send_whatsapp_message(phone_number, error_msg)
@@ -235,16 +237,41 @@ class WhatsappService:
     ) -> Transaction:
 
         category = (
-            db.query(Category).filter(Category.name == parsed_data["category"] , Category.user_id == user.id).first()
+            db.query(Category)
+            .filter(
+                Category.name == parsed_data["category"], Category.user_id == user.id
+            )
+            .first()
         )
 
         if not category:
-            category = db.query(Category).filter(Category.name == "other" , Category.user_id == user.id , Category.is_default == True).first()
+            category = (
+                db.query(Category)
+                .filter(
+                    Category.name == "other", Category.user_id == user.id
+                )
+                .first()
+            )
 
         if not category:
-            category = db.query(Category).filter(
-                Category.name == "other" , Category.user_id == user.id
-            ).first()
+            category = (
+                db.query(Category)
+                .filter(
+                    Category.name == parsed_data["category"],
+                    Category.is_default == True,
+                )
+                .first()
+            )
+
+        if not category:
+            category = (
+                db.query(Category)
+                .filter(Category.name == "other", Category.is_default == True)
+                .first()
+            )
+        
+        if not category:
+            raise ValueError("No category found")
 
         new_transaction = Transaction(
             user_id=user.id,

@@ -8,6 +8,7 @@ DEFAULT_CATEGORIES = [
         "description": "Expenses related to groceries and dining.",
         "color": "#4CAF50",
         "icon": "🥗",
+        "is_default": True,
     },
     {
         "name": "transportation",
@@ -15,6 +16,7 @@ DEFAULT_CATEGORIES = [
         "description": "Expenses related to transportation, including public transit and fuel.",
         "color": "#2196F3",
         "icon": "🚗",
+        "is_default": True,
     },
     {
         "name": "entertainment",
@@ -22,6 +24,7 @@ DEFAULT_CATEGORIES = [
         "description": "Expenses related to entertainment, including movies, concerts, and events.",
         "color": "#FF9800",
         "icon": "🎉",
+        "is_default": True,
     },
     {
         "name": "healthcare",
@@ -29,6 +32,7 @@ DEFAULT_CATEGORIES = [
         "description": "Expenses related to healthcare, including medical bills and insurance.",
         "color": "#E91E63",
         "icon": "🏥",
+        "is_default": True,
     },
     {
         "name": "other",
@@ -36,6 +40,7 @@ DEFAULT_CATEGORIES = [
         "description": "Miscellaneous expenses that don't fit into other categories.",
         "color": "#9E9E9E",
         "icon": "🗂️",
+        "is_default": True,
     },
 ]
 

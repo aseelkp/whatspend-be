@@ -21,7 +21,7 @@ class LLMService:
         try:
             self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
             self.model = "gemini-2.5-flash"
-            self._category_cache = None
+            self._category_cache = {}
             self._cache_timestamp = None
             logger.info(f"LLMService initialized with model: {self.model}")
         except Exception as e:
@@ -46,7 +46,7 @@ class LLMService:
             )
 
             parsed_data = (
-                self._parse_gemini_response(response.text) if response.text else None
+                self._parse_gemini_response(response.text , user_id=user_id) if response.text and user_id else None
             )
 
             logger.info(f"Gemini parsed message successfully: {parsed_data}")
@@ -114,7 +114,7 @@ class LLMService:
 
         return prompt
 
-    def _parse_gemini_response(self, response: str):
+    def _parse_gemini_response(self, response: str , user_id: Optional[str] = None):
         try:
             cleaned_response = response.strip()
             if cleaned_response.startswith("```json"):
@@ -134,7 +134,7 @@ class LLMService:
                 validated_transactions = []
 
                 for t in transactions:
-                    validated_t = self._validate_transaction(t)
+                    validated_t = self._validate_transaction(t , user_id=user_id)
                     validated_transactions.append(validated_t)
 
                 return {
@@ -142,7 +142,7 @@ class LLMService:
                     "is_multiple": len(transactions) > 1,
                 }
             else:
-                validated_transaction = self._validate_transaction(data)
+                validated_transaction = self._validate_transaction(data , user_id=user_id)
                 return {"transactions": [validated_transaction], "is_multiple": False}
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Gemini response: {response}")
@@ -151,7 +151,7 @@ class LLMService:
             logger.error(f"Failed to parse Gemini response: {e}")
             raise ValueError(f"Invalid response: {str(e)}")
 
-    def _validate_transaction(self, transaction: Dict):
+    def _validate_transaction(self, transaction: Dict , user_id: Optional[str] = None):
 
         required_field = [
             "amount",
@@ -173,7 +173,7 @@ class LLMService:
         if transaction["transaction_type"] not in ["EXPENSE", "INCOME"]:
             raise ValueError("Invalid transaction type")
 
-        valid_categories = self._get_valid_categories(user_id=transaction["user_id"])
+        valid_categories = self._get_valid_categories(user_id=user_id)
         if transaction["category"].lower() not in valid_categories:
             logger.warning(f"Invalid category: {transaction['category']}")
             transaction["category"] = "other"
@@ -193,12 +193,12 @@ class LLMService:
 
         from datetime import datetime, timedelta
 
-        if not force_refresh and self._category_cache is not None:
+        if not force_refresh and self._category_cache is not None and user_id in self._category_cache:
             if (
                 self._cache_timestamp
                 and datetime.now() - self._cache_timestamp < timedelta(minutes=5)
             ):
-                return self._category_cache
+                return self._category_cache[user_id if user_id else "default"]["categories"]
         db = SessionLocal()
         try:
             if user_id:
@@ -217,12 +217,15 @@ class LLMService:
                     Category.is_active == True,
                     Category.is_default == True
                 ).all()
-            self._category_cache = [cat.name for cat in categories]
+            self._category_cache[user_id if user_id else "default"] = {
+                "categories": [cat.name for cat in categories],
+                "timestamp": datetime.now()
+            }
             self._cache_timestamp = datetime.now()
             logger.info(
-                f"Updated category cache with {len(self._category_cache)} categories"
+                f"Updated category cache with {len(self._category_cache[user_id if user_id else "default"]["categories"])} categories for user {user_id if user_id else "default"}"
             )
-            return self._category_cache
+            return self._category_cache[user_id if user_id else "default"]["categories"]
         except Exception as e:
             logger.error(f"Error getting valid categories: {e}")
             return ["other"]

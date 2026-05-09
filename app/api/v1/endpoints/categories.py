@@ -79,5 +79,5 @@ def get_user_categories(user_id : str , db : Session = Depends(get_db)) :
 
     return success("Categories retrieved successfully", data=[CategoryResponse.model_validate(cat).model_dump() for cat in categories])
 
-@router.post("/user/{user_id}", response_model=StandardResponse)
-def create_user_category(user = Depends(get_current_user))
+# @router.post("/user/{user_id}", response_model=StandardResponse)
+# def create_user_category(user = Depends(get_current_user))
